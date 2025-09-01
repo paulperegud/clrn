@@ -1,0 +1,8 @@
+GoT/S01E01.mkv
+GoT/S01E02.mkv
+GoT/S01E03.mkv
+GoT/S01E04.mkv
+GoT/S01E05.mkv
+GoT/S01E06.mkv
+GoT/S01E07.mkv
+GoT/S02E01.mkv
