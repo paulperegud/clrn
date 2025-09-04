@@ -70,9 +70,29 @@ pub fn main() !void {
 }
 
 pub fn collect_files(allocator: std.mem.Allocator, source: []const u8) !std.ArrayList([]const u8) {
+    if (!std.mem.eql(u8, source, "-")) {
+        const cwd = std.fs.cwd();
+        const dir: std.fs.Dir = try cwd.openDir(source, .{ .iterate = true });
+        return try collect_files_from_directory(allocator, dir);
+    } else return try collect_files_from_stdin(allocator);
+}
+
+pub fn collect_files_from_stdin(allocator: std.mem.Allocator) !std.ArrayList([]const u8) {
     var result = std.ArrayList([]const u8).init(allocator);
-    const cwd = std.fs.cwd();
-    const dir: std.fs.Dir = try cwd.openDir(source, .{ .iterate = true });
+    const reader = std.io.getStdIn().reader();
+    var buf: [1024]u8 = undefined;
+    while (true) {
+        const mbline = try reader.readUntilDelimiterOrEof(&buf, '\n');
+        if (mbline) |line| {
+            const ownedline: []u8 = try allocator.alloc(u8, line.len);
+            std.mem.copyForwards(u8, ownedline, line);
+            try result.append(ownedline);
+        } else return result;
+    }
+}
+
+pub fn collect_files_from_directory(allocator: std.mem.Allocator, dir: std.fs.Dir) !std.ArrayList([]const u8) {
+    var result = std.ArrayList([]const u8).init(allocator);
     var walker = try dir.walk(allocator);
     defer walker.deinit();
     while (try walker.next()) |entry| {
