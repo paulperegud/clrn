@@ -13,7 +13,8 @@
             buildInputs = [
                 pkgs.zig
                 pkgs.renameutils # qmv
-                pkgs.tree        # tree, used in tests
+                pkgs.coreutils
+                pkgs.tree
             ];
         };
     });
