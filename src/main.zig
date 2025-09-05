@@ -14,12 +14,27 @@ var bw = std.io.bufferedWriter(stdout);
 const usage =
     \\-h, --help           Print this message and exit.
     \\--debug              Show list of files as collected from directory or stdin
+    \\--nvim               Run nvim and pipe text into it
     \\<DIRECTORY>          Directory name or `-` for stdin
 ;
 
 const Options = struct {
     debugShowSource: bool = false,
+    debugRunNVim: bool = false,
     directory: []const u8 = undefined,
+};
+
+const Paths = struct {
+    items: std.ArrayList([]const u8),
+    pub fn eql(this: *Paths, other: Paths) bool {
+        const this_items = this.*.items.items;
+        const other_items = other.items.items;
+        if (this_items.len != other_items.len) return false;
+        for (this_items, 0..) |this_item, index| {
+            if (!std.mem.eql(u8, this_item, other_items[index])) return false;
+        }
+        return true;
+    }
 };
 
 pub fn main() !void {
@@ -50,36 +65,88 @@ pub fn main() !void {
         try bw.writer().print("\n\n", .{});
         try clap.help(bw.writer(), clap.Help, &parsed_help, .{ .spacing_between_parameters = 0 });
         try bw.flush();
+        return;
     }
     if (params.args.debug != 0) {
         opts.debugShowSource = true;
     }
+    if (params.args.nvim != 0) {
+        opts.debugRunNVim = true;
+    }
     opts.directory = params.positionals[0] orelse ".";
 
-    if (opts.debugShowSource) {
-        const files: std.ArrayList([]const u8) = try collect_files(allocator, opts.directory);
-        defer files.deinit();
-        for (files.items) |line| {
-            debug("file: {s}\n", .{line});
+    const files: Paths = try collectPaths(allocator, opts.directory);
+    defer {
+        for (files.items.items) |line| {
             allocator.free(line);
+        }
+        files.items.deinit();
+    }
+
+    if (opts.debugShowSource) {
+        for (files.items.items) |line| {
+            debug("file: {s}\n", .{line});
         }
         return;
     }
 
-    try bw.flush(); // Don't forget to flush!
+    if (opts.debugRunNVim) {
+        const cmd_file_name: []const u8 = try writeFilesToTmpfileAlloc(allocator, files);
+        defer allocator.free(cmd_file_name);
+        defer {
+            _ = std.fs.deleteFileAbsolute(cmd_file_name) catch |err| {
+                debug("tmp file deletion failed: {any}\n", .{err});
+            };
+        }
+        var nvim = std.process.Child.init(&.{ "nvim", cmd_file_name }, allocator);
+        // wait for nvim
+        const pid = try nvim.spawn();
+        debug("pid is {any}\n", .{pid});
+        _ = try nvim.wait();
+        // read the file
+        const file = try std.fs.openFileAbsolute(cmd_file_name, .{});
+        const reader = file.reader();
+        defer file.close();
+        var commands: Paths = try collectPathsFromFile(reader, allocator);
+        defer {
+            for (commands.items.items) |line| {
+                allocator.free(line);
+            }
+            commands.items.deinit();
+        }
+        if (commands.eql(files)) {
+            debug("File names are unchanged.\n", .{});
+        }
+        // print it
+        // std.debug.print("child is {any}\n", .{nvim});
+    }
 }
 
-pub fn collect_files(allocator: std.mem.Allocator, source: []const u8) !std.ArrayList([]const u8) {
+pub fn writeFilesToTmpfileAlloc(allocator: std.mem.Allocator, files: Paths) ![]const u8 {
+    const tmp = std.posix.getenv("TMP");
+    const cmd_file_name: []const u8 = try std.fs.path.join(allocator, &.{ tmp.?, "clrn.cmd" });
+    const cmd_file = try std.fs.createFileAbsolute(cmd_file_name, .{});
+    for (files.items.items) |line| {
+        _ = try cmd_file.write(line);
+        _ = try cmd_file.write("\n");
+    }
+    cmd_file.close();
+    return cmd_file_name;
+}
+
+pub fn collectPaths(allocator: std.mem.Allocator, source: []const u8) !Paths {
     if (!std.mem.eql(u8, source, "-")) {
         const cwd = std.fs.cwd();
         const dir: std.fs.Dir = try cwd.openDir(source, .{ .iterate = true });
-        return try collect_files_from_directory(allocator, dir);
-    } else return try collect_files_from_stdin(allocator);
+        return try collectPathsFromDirectory(allocator, dir);
+    } else {
+        const reader = std.io.getStdIn().reader();
+        return try collectPathsFromFile(reader, allocator);
+    }
 }
 
-pub fn collect_files_from_stdin(allocator: std.mem.Allocator) !std.ArrayList([]const u8) {
+pub fn collectPathsFromFile(reader: std.fs.File.Reader, allocator: std.mem.Allocator) !Paths {
     var result = std.ArrayList([]const u8).init(allocator);
-    const reader = std.io.getStdIn().reader();
     var buf: [1024]u8 = undefined;
     while (true) {
         const mbline = try reader.readUntilDelimiterOrEof(&buf, '\n');
@@ -87,11 +154,11 @@ pub fn collect_files_from_stdin(allocator: std.mem.Allocator) !std.ArrayList([]c
             const ownedline: []u8 = try allocator.alloc(u8, line.len);
             std.mem.copyForwards(u8, ownedline, line);
             try result.append(ownedline);
-        } else return result;
+        } else return .{ .items = result };
     }
 }
 
-pub fn collect_files_from_directory(allocator: std.mem.Allocator, dir: std.fs.Dir) !std.ArrayList([]const u8) {
+pub fn collectPathsFromDirectory(allocator: std.mem.Allocator, dir: std.fs.Dir) !Paths {
     var result = std.ArrayList([]const u8).init(allocator);
     var walker = try dir.walk(allocator);
     defer walker.deinit();
@@ -101,7 +168,7 @@ pub fn collect_files_from_directory(allocator: std.mem.Allocator, dir: std.fs.Di
         std.mem.copyForwards(u8, copy, entry.path);
         try result.append(copy);
     }
-    return result;
+    return .{ .items = result };
 }
 
 test "read tree" {
