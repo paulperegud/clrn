@@ -90,36 +90,66 @@ pub fn main() !void {
         return;
     }
 
-    if (opts.debugRunNVim) {
-        const cmd_file_name: []const u8 = try writeFilesToTmpfileAlloc(allocator, files);
-        defer allocator.free(cmd_file_name);
-        defer {
-            _ = std.fs.deleteFileAbsolute(cmd_file_name) catch |err| {
-                debug("tmp file deletion failed: {any}\n", .{err});
-            };
-        }
-        var nvim = std.process.Child.init(&.{ "nvim", cmd_file_name }, allocator);
-        // wait for nvim
-        const pid = try nvim.spawn();
-        debug("pid is {any}\n", .{pid});
-        _ = try nvim.wait();
-        // read the file
+    const cmd_file_name: []const u8 = try writeFilesToTmpfileAlloc(allocator, files);
+    defer allocator.free(cmd_file_name);
+    defer {
+        _ = std.fs.deleteFileAbsolute(cmd_file_name) catch |err| {
+            debug("tmp file deletion failed: {any}\n", .{err});
+        };
+    }
+    var nvim = std.process.Child.init(&.{ "nvim", cmd_file_name }, allocator);
+    // wait for nvim
+    _ = try nvim.spawn();
+    _ = try nvim.wait();
+    // read the file
+    var commands: Paths = load_commands: {
         const file = try std.fs.openFileAbsolute(cmd_file_name, .{});
         const reader = file.reader();
         defer file.close();
-        var commands: Paths = try collectPathsFromFile(reader, allocator);
-        defer {
-            for (commands.items.items) |line| {
-                allocator.free(line);
-            }
-            commands.items.deinit();
+        break :load_commands try collectPathsFromFile(reader, allocator);
+    };
+    defer {
+        for (commands.items.items) |line| {
+            allocator.free(line);
         }
-        if (commands.eql(files)) {
-            debug("File names are unchanged.\n", .{});
-        }
-        // print it
-        // std.debug.print("child is {any}\n", .{nvim});
+        commands.items.deinit();
     }
+    if (commands.eql(files)) {
+        debug("File names are unchanged.\n", .{});
+        return;
+    }
+    // print it
+    debug("imagine that this is your commands, printed out...\n", .{});
+    // ask if continue
+    _ = try getInteractiveChoice(allocator, "Commit this change?", &.{ .{ .short = 'y', .long = "yes" }, .{ .short = 'n', .long = "no" } });
+}
+
+const InteractiveChoice = struct {
+    short: u8,
+    long: []const u8,
+    default: bool = false,
+};
+
+pub fn getInteractiveChoice(allocator: std.mem.Allocator, prompt: []const u8, options: []const InteractiveChoice) !?InteractiveChoice {
+    debug("{s} [", .{prompt});
+    var first = true;
+    for (options) |option| {
+        if (!first) {
+            debug("/", .{});
+        }
+        debug("{any}", .{option.short});
+        first = false;
+    }
+    debug("] ", .{});
+    const reader = std.io.getStdIn().reader();
+    var buff: [5]u8 = undefined;
+    const answerAnyCase = try reader.readUntilDelimiter(&buff, '\n');
+    const answer = try std.ascii.allocLowerString(allocator, answerAnyCase);
+    defer allocator.free(answer);
+    for (options) |option| {
+        if (std.mem.eql(u8, &[_]u8{option.short}, answer)) return option;
+    }
+    return null;
 }
 
 pub fn writeFilesToTmpfileAlloc(allocator: std.mem.Allocator, files: Paths) ![]const u8 {
@@ -163,6 +193,7 @@ pub fn collectPathsFromDirectory(allocator: std.mem.Allocator, dir: std.fs.Dir) 
     var walker = try dir.walk(allocator);
     defer walker.deinit();
     while (try walker.next()) |entry| {
+        if (entry.kind == .directory) continue;
         if (entry.path.len == 0) continue;
         const copy: []u8 = try allocator.alloc(u8, entry.path.len);
         std.mem.copyForwards(u8, copy, entry.path);
