@@ -54,7 +54,7 @@ pub fn main() !void {
         .allocator = allocator,
     }) catch |err| {
         diag.report(std.io.getStdErr().writer(), err) catch {};
-        return err;
+        std.posix.exit(1);
     };
     defer params.deinit();
 
@@ -65,7 +65,7 @@ pub fn main() !void {
         try bw.writer().print("\n\n", .{});
         try clap.help(bw.writer(), clap.Help, &parsed_help, .{ .spacing_between_parameters = 0 });
         try bw.flush();
-        return;
+        std.posix.exit(1);
     }
     if (params.args.debug != 0) {
         opts.debugShowSource = true;
@@ -87,7 +87,7 @@ pub fn main() !void {
         for (files.items.items) |line| {
             debug("file: {s}\n", .{line});
         }
-        return;
+        std.posix.exit(1);
     }
 
     const cmd_file_name: []const u8 = try writeFilesToTmpfileAlloc(allocator, files);
@@ -106,6 +106,7 @@ pub fn main() !void {
         const file = try std.fs.openFileAbsolute(cmd_file_name, .{});
         const reader = file.reader();
         defer file.close();
+        // this is the way to return a value from a block of code...
         break :load_commands try collectPathsFromFile(reader, allocator);
     };
     defer {
@@ -116,12 +117,25 @@ pub fn main() !void {
     }
     if (commands.eql(files)) {
         debug("File names are unchanged.\n", .{});
-        return;
+        std.posix.exit(1);
+    }
+    if (commands.items.items.len != files.items.items.len) {
+        debug("Number of lines changed, please retry.\n", .{});
+        std.posix.exit(1);
     }
     // print it
     debug("imagine that this is your commands, printed out...\n", .{});
     // ask if continue
-    _ = try getInteractiveChoice(allocator, "Commit this change?", &.{ .{ .short = 'y', .long = "yes" }, .{ .short = 'n', .long = "no" } });
+    while (true) {
+        const mbanswer = try getInteractiveChoice(allocator, "Commit this change?", &.{ .{ .short = 'y', .long = "yes" }, .{ .short = 'n', .long = "no" } });
+        if (mbanswer) |answer| {
+            debug("committing... {s}\n", .{answer.long});
+            break;
+        } else {
+            debug("Please answer one of the following...\n", .{});
+        }
+    }
+    // modify paths
 }
 
 const InteractiveChoice = struct {
@@ -137,7 +151,7 @@ pub fn getInteractiveChoice(allocator: std.mem.Allocator, prompt: []const u8, op
         if (!first) {
             debug("/", .{});
         }
-        debug("{any}", .{option.short});
+        debug("{s}", .{[1]u8{option.short}});
         first = false;
     }
     debug("] ", .{});
@@ -146,10 +160,12 @@ pub fn getInteractiveChoice(allocator: std.mem.Allocator, prompt: []const u8, op
     const answerAnyCase = try reader.readUntilDelimiter(&buff, '\n');
     const answer = try std.ascii.allocLowerString(allocator, answerAnyCase);
     defer allocator.free(answer);
-    for (options) |option| {
-        if (std.mem.eql(u8, &[_]u8{option.short}, answer)) return option;
-    }
-    return null;
+    const choice = for (options) |option| {
+        if (std.mem.eql(u8, &[_]u8{option.short}, answer)) break option;
+    } else for (options) |option| {
+        if (option.default) break option;
+    } else null;
+    return choice;
 }
 
 pub fn writeFilesToTmpfileAlloc(allocator: std.mem.Allocator, files: Paths) ![]const u8 {
