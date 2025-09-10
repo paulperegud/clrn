@@ -35,6 +35,13 @@ const Paths = struct {
         }
         return true;
     }
+
+    pub fn free(allocator: std.mem.Allocator, instance: *Paths) void {
+        for (instance.*.items.items) |line| {
+            allocator.free(line);
+        }
+        instance.*.items.deinit();
+    }
 };
 
 pub fn main() !void {
@@ -75,7 +82,7 @@ pub fn main() !void {
     }
     opts.directory = params.positionals[0] orelse ".";
 
-    const files: Paths = try collectPaths(allocator, opts.directory);
+    var files: Paths = try collectPaths(allocator, opts.directory);
     defer {
         for (files.items.items) |line| {
             allocator.free(line);
@@ -136,6 +143,61 @@ pub fn main() !void {
         }
     }
     // modify paths
+    const cwd = try std.fs.cwd().openDir(opts.directory, .{});
+    _ = try transform_tree(cwd, files, commands);
+}
+
+pub fn transform_tree(cwd: std.fs.Dir, from: Paths, to: Paths) !void {
+    const path_comps = std.fs.path.ComponentIterator(.posix, u8);
+    for (from.items.items, 0..) |source, index| {
+        const target = to.items.items[index];
+        debug("{s} => {s}\n", .{ source, target });
+        var iter = try path_comps.init(target);
+        while (iter.next()) |comp| {
+            if (iter.peekNext()) |_| {
+                if (cwd.makeDir(comp.path)) {} else |err| switch (err) {
+                    error.PathAlreadyExists => continue,
+                    else => return err,
+                }
+            } else {
+                _ = try moveFile(cwd, source, target);
+            }
+        }
+    }
+}
+
+pub fn moveFile(cwd: std.fs.Dir, source: []const u8, target: []const u8) !void {
+    const source_dir_path = std.fs.path.dirname(source) orelse ".";
+    const target_dir_path = std.fs.path.dirname(target) orelse ".";
+    const source_dir = try cwd.openDir(source_dir_path, .{});
+    const target_dir = try cwd.openDir(target_dir_path, .{});
+    std.fs.rename(source_dir, std.fs.path.basename(source), target_dir, std.fs.path.basename(target)) catch |err| switch (err) {
+        error.PathAlreadyExists => {
+            debug("Path {s} already exists!\n", .{target});
+            std.posix.exit(1);
+        },
+        else => return err,
+    };
+}
+
+test "test 1." {
+    const allocator = std.testing.allocator;
+    const cwd = try std.fs.cwd().openDir("tests", .{});
+    var files = try collectPathsFromDirectory(allocator, try cwd.openDir("1.source/", .{ .iterate = true }));
+    defer Paths.free(allocator, &files);
+    const commands_reader = (try cwd.openFile("1.cmd", .{})).reader();
+    var commands = try collectPathsFromFile(commands_reader, allocator);
+    defer Paths.free(allocator, &commands);
+
+    try transform_tree(try cwd.openDir("1.source/", .{}), files, commands);
+}
+
+test "iter path" {
+    const path_comps = std.fs.path.ComponentIterator(.posix, u8);
+    var iter = try path_comps.init("file.txt");
+    while (iter.next()) |comp| {
+        debug("comp is {s}\n", .{comp.name});
+    }
 }
 
 const InteractiveChoice = struct {
