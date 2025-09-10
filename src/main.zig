@@ -145,7 +145,7 @@ pub fn main() !void {
     debug("imagine that this is your commands, printed out...\n", .{});
     // ask if continue
     while (true) {
-        const mbanswer = try getInteractiveChoice(allocator, "Commit this change?", &.{ .{ .short = 'y', .long = "yes" }, .{ .short = 'n', .long = "no" } });
+        const mbanswer = try getInteractiveChoice("Commit this change?", &.{ .{ .short = 'y', .long = "yes" }, .{ .short = 'n', .long = "no" } });
         if (mbanswer) |answer| {
             debug("committing... {s}\n", .{answer.long});
             break;
@@ -180,8 +180,10 @@ pub fn transform_tree(cwd: std.fs.Dir, from: Paths, to: Paths) !void {
 pub fn moveFile(cwd: std.fs.Dir, source: []const u8, target: []const u8) !void {
     const source_dir_path = std.fs.path.dirname(source) orelse ".";
     const target_dir_path = std.fs.path.dirname(target) orelse ".";
-    const source_dir = try cwd.openDir(source_dir_path, .{});
-    const target_dir = try cwd.openDir(target_dir_path, .{});
+    var source_dir = try cwd.openDir(source_dir_path, .{});
+    defer source_dir.close();
+    var target_dir = try cwd.openDir(target_dir_path, .{});
+    defer target_dir.close();
     std.fs.rename(source_dir, std.fs.path.basename(source), target_dir, std.fs.path.basename(target)) catch |err| switch (err) {
         error.PathAlreadyExists => {
             debug("Path {s} already exists!\n", .{target});
@@ -217,7 +219,7 @@ const InteractiveChoice = struct {
     default: bool = false,
 };
 
-pub fn getInteractiveChoice(allocator: std.mem.Allocator, prompt: []const u8, options: []const InteractiveChoice) !?InteractiveChoice {
+pub fn getInteractiveChoice(prompt: []const u8, options: []const InteractiveChoice) !?InteractiveChoice {
     debug("{s} [", .{prompt});
     var first = true;
     for (options) |option| {
@@ -230,11 +232,9 @@ pub fn getInteractiveChoice(allocator: std.mem.Allocator, prompt: []const u8, op
     debug("] ", .{});
     const reader = std.io.getStdIn().reader();
     var buff: [5]u8 = undefined;
-    const answerAnyCase = try reader.readUntilDelimiter(&buff, '\n');
-    const answer = try std.ascii.allocLowerString(allocator, answerAnyCase);
-    defer allocator.free(answer);
+    const answer = try reader.readUntilDelimiter(&buff, '\n');
     const choice = for (options) |option| {
-        if (std.mem.eql(u8, &[_]u8{option.short}, answer)) break option;
+        if (std.ascii.eqlIgnoreCase(&[_]u8{option.short}, answer)) break option;
     } else for (options) |option| {
         if (option.default) break option;
     } else null;
