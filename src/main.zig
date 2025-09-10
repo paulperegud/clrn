@@ -122,12 +122,23 @@ pub fn main() !void {
         }
         commands.items.deinit();
     }
-    if (commands.eql(files)) {
-        debug("File names are unchanged.\n", .{});
-        std.posix.exit(1);
-    }
+    // number of lines changed means ambiguity in what should be renamed to what
     if (commands.items.items.len != files.items.items.len) {
         debug("Number of lines changed, please retry.\n", .{});
+        std.posix.exit(1);
+    }
+    // cleanup identical lines in source and target
+    const total_files = files.items.items.len;
+    for (1..files.items.items.len + 1) |i| {
+        const index = total_files - i;
+        if (std.mem.eql(u8, files.items.items[index], commands.items.items[index])) {
+            allocator.free(files.items.orderedRemove(index));
+            allocator.free(commands.items.orderedRemove(index));
+        }
+    }
+    // check if there is actual work to be done
+    if (files.items.items.len == 0) {
+        debug("File names are unchanged.\n", .{});
         std.posix.exit(1);
     }
     // print it
