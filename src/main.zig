@@ -189,8 +189,21 @@ pub fn moveFile(cwd: std.fs.Dir, source: []const u8, target: []const u8) !void {
             debug("Path {s} already exists!\n", .{target});
             std.posix.exit(1);
         },
+        error.RenameAcrossMountPoints => {
+            try copyFile(cwd, source, target);
+        },
         else => return err,
     };
+}
+
+pub fn copyFile(cwd: std.fs.Dir, source: []const u8, dest: []const u8) !void {
+    const source_dir_path = std.fs.path.dirname(source) orelse ".";
+    const dest_dir_path = std.fs.path.dirname(dest) orelse ".";
+    var source_dir = try cwd.openDir(source_dir_path, .{});
+    defer source_dir.close();
+    var dest_dir = try cwd.openDir(dest_dir_path, .{});
+    defer dest_dir.close();
+    try source_dir.copyFile(std.fs.path.basename(source), dest_dir, std.fs.path.basename(dest), .{});
 }
 
 test "test 1." {
