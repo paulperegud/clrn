@@ -13,14 +13,10 @@ const stdout = &stdout_writer.interface;
 
 const usage =
     \\-h, --help           Print this message and exit.
-    \\--debug              Show list of files as collected from directory or stdin
-    \\--nvim               Run nvim and pipe text into it
     \\<DIRECTORY>          Directory name or `-` for stdin
 ;
 
 const Options = struct {
-    debugShowSource: bool = false,
-    debugRunNVim: bool = false,
     directory: []const u8 = undefined,
 };
 
@@ -74,12 +70,6 @@ pub fn main() !void {
         try stdout.flush();
         std.posix.exit(1);
     }
-    if (params.args.debug != 0) {
-        opts.debugShowSource = true;
-    }
-    if (params.args.nvim != 0) {
-        opts.debugRunNVim = true;
-    }
     opts.directory = params.positionals[0] orelse ".";
 
     var files: Paths = try collectPaths(allocator, opts.directory);
@@ -88,13 +78,6 @@ pub fn main() !void {
             allocator.free(line);
         }
         files.items.deinit(allocator);
-    }
-
-    if (opts.debugShowSource) {
-        for (files.items.items) |line| {
-            debug("file: {s}\n", .{line});
-        }
-        std.posix.exit(1);
     }
 
     const cmd_file_name: []const u8 = try writeFilesToTmpfileAlloc(allocator, files);
