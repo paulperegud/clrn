@@ -7,9 +7,9 @@ const clap = @import("clap");
 
 const debug = std.debug.print;
 
-const stdout = std.io.getStdOut().writer();
-const stderr = std.io.getStdErr().writer();
-var bw = std.io.bufferedWriter(stdout);
+var stdout_buffer: [1024]u8 = undefined;
+var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+const stdout = &stdout_writer.interface;
 
 const usage =
     \\-h, --help           Print this message and exit.
@@ -40,7 +40,7 @@ const Paths = struct {
         for (instance.*.items.items) |line| {
             allocator.free(line);
         }
-        instance.*.items.deinit();
+        instance.*.items.deinit(allocator);
     }
 };
 
@@ -60,18 +60,18 @@ pub fn main() !void {
         .diagnostic = &diag,
         .allocator = allocator,
     }) catch |err| {
-        diag.report(std.io.getStdErr().writer(), err) catch {};
-        std.posix.exit(1);
+        try diag.reportToFile(.stderr(), err);
+        return err;
     };
     defer params.deinit();
 
     var opts: Options = .{};
     if (params.args.help != 0) {
-        try bw.writer().print("Usage:  clrn ", .{});
-        try clap.usage(bw.writer(), clap.Help, &parsed_help);
-        try bw.writer().print("\n\n", .{});
-        try clap.help(bw.writer(), clap.Help, &parsed_help, .{ .spacing_between_parameters = 0 });
-        try bw.flush();
+        try stdout.print("Usage:  clrn ", .{});
+        try clap.usage(stdout, clap.Help, &parsed_help);
+        try stdout.print("\n\n", .{});
+        try clap.help(stdout, clap.Help, &parsed_help, .{ .spacing_between_parameters = 0 });
+        try stdout.flush();
         std.posix.exit(1);
     }
     if (params.args.debug != 0) {
@@ -87,7 +87,7 @@ pub fn main() !void {
         for (files.items.items) |line| {
             allocator.free(line);
         }
-        files.items.deinit();
+        files.items.deinit(allocator);
     }
 
     if (opts.debugShowSource) {
@@ -110,18 +110,15 @@ pub fn main() !void {
     _ = try nvim.wait();
     // read the file
     var commands: Paths = load_commands: {
+        // TODO: size of this buffer should be determined by the size of the file
         const file = try std.fs.openFileAbsolute(cmd_file_name, .{});
-        const reader = file.reader();
+        var file_buffer: [1024]u8 = undefined;
+        var reader = file.reader(&file_buffer);
         defer file.close();
         // this is the way to return a value from a block of code...
-        break :load_commands try collectPathsFromFile(reader, allocator);
+        break :load_commands try collectPathsFromFile(&reader, allocator);
     };
-    defer {
-        for (commands.items.items) |line| {
-            allocator.free(line);
-        }
-        commands.items.deinit();
-    }
+    defer Paths.free(allocator, &commands);
     // number of lines changed means ambiguity in what should be renamed to what
     if (commands.items.items.len != files.items.items.len) {
         debug("Number of lines changed, please retry.\n", .{});
@@ -211,8 +208,9 @@ test "test 1." {
     const cwd = try std.fs.cwd().openDir("tests", .{});
     var files = try collectPathsFromDirectory(allocator, try cwd.openDir("1.source/", .{ .iterate = true }));
     defer Paths.free(allocator, &files);
-    const commands_reader = (try cwd.openFile("1.cmd", .{})).reader();
-    var commands = try collectPathsFromFile(commands_reader, allocator);
+    var file_buffer: [1024]u8 = undefined;
+    var commands_reader = (try cwd.openFile("1.cmd", .{})).reader(&file_buffer);
+    var commands = try collectPathsFromFile(&commands_reader, allocator);
     defer Paths.free(allocator, &commands);
 
     try transform_tree(try cwd.openDir("1.source/", .{}), files, commands);
@@ -243,9 +241,9 @@ pub fn getInteractiveChoice(prompt: []const u8, options: []const InteractiveChoi
         first = false;
     }
     debug("] ", .{});
-    const reader = std.io.getStdIn().reader();
-    var buff: [5]u8 = undefined;
-    const answer = try reader.readUntilDelimiter(&buff, '\n');
+    var confirmation_buffer: [5]u8 = undefined;
+    var reader = std.fs.File.stdin().reader(&confirmation_buffer);
+    const answer = try reader.interface.takeDelimiterExclusive('\n');
     const choice = for (options) |option| {
         if (std.ascii.eqlIgnoreCase(&[_]u8{option.short}, answer)) break option;
     } else for (options) |option| {
@@ -272,26 +270,27 @@ pub fn collectPaths(allocator: std.mem.Allocator, source: []const u8) !Paths {
         const dir: std.fs.Dir = try cwd.openDir(source, .{ .iterate = true });
         return try collectPathsFromDirectory(allocator, dir);
     } else {
-        const reader = std.io.getStdIn().reader();
-        return try collectPathsFromFile(reader, allocator);
+        // figure out the strategy for the buffer size here...
+        var stdin_buffer: [1024]u8 = undefined;
+        var reader = std.fs.File.stdin().reader(&stdin_buffer);
+        return try collectPathsFromFile(&reader, allocator);
     }
 }
 
-pub fn collectPathsFromFile(reader: std.fs.File.Reader, allocator: std.mem.Allocator) !Paths {
-    var result = std.ArrayList([]const u8).init(allocator);
-    var buf: [1024]u8 = undefined;
-    while (true) {
-        const mbline = try reader.readUntilDelimiterOrEof(&buf, '\n');
-        if (mbline) |line| {
-            const ownedline: []u8 = try allocator.alloc(u8, line.len);
-            std.mem.copyForwards(u8, ownedline, line);
-            try result.append(ownedline);
-        } else return .{ .items = result };
+pub fn collectPathsFromFile(reader: *std.fs.File.Reader, allocator: std.mem.Allocator) !Paths {
+    var result = std.ArrayList([]const u8).empty;
+    while (reader.interface.takeDelimiterExclusive('\n')) |line| {
+        const ownedline: []u8 = try allocator.alloc(u8, line.len);
+        std.mem.copyForwards(u8, ownedline, line);
+        try result.append(allocator, ownedline);
+    } else |err| switch (err) {
+        error.EndOfStream => return .{ .items = result },
+        error.StreamTooLong, error.ReadFailed => return err,
     }
 }
 
 pub fn collectPathsFromDirectory(allocator: std.mem.Allocator, dir: std.fs.Dir) !Paths {
-    var result = std.ArrayList([]const u8).init(allocator);
+    var result = std.ArrayList([]const u8).empty;
     var walker = try dir.walk(allocator);
     defer walker.deinit();
     while (try walker.next()) |entry| {
@@ -299,7 +298,7 @@ pub fn collectPathsFromDirectory(allocator: std.mem.Allocator, dir: std.fs.Dir) 
         if (entry.path.len == 0) continue;
         const copy: []u8 = try allocator.alloc(u8, entry.path.len);
         std.mem.copyForwards(u8, copy, entry.path);
-        try result.append(copy);
+        try result.append(allocator, copy);
     }
     return .{ .items = result };
 }
@@ -340,9 +339,9 @@ test "read tree" {
 }
 
 test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
+    var list = std.ArrayList(i32).empty;
+    defer list.deinit(std.testing.allocator); // Try commenting this out and see if zig detects the memory leak!
+    try list.append(std.testing.allocator, 42);
     try std.testing.expectEqual(@as(i32, 42), list.pop());
 }
 
