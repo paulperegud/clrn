@@ -28,6 +28,12 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const tree_mod = b.createModule(.{
+        .root_source_file = b.path("src/tree.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     // We will also create a module for our other entry point, 'main.zig'.
     const exe_mod = b.createModule(.{
         // `root_source_file` is the Zig "entry point" of the module. If a module
@@ -53,10 +59,17 @@ pub fn build(b: *std.Build) void {
         .root_module = lib_mod,
     });
 
+    const tree = b.addLibrary(.{
+        .linkage = .static,
+        .name = "clrn",
+        .root_module = tree_mod,
+    });
+
     // This declares intent for the library to be installed into the standard
     // location when the user invokes the "install" step (the default step when
     // running `zig build`).
     b.installArtifact(lib);
+    b.installArtifact(tree);
 
     // This creates another `std.Build.Step.Compile`, but this one builds an executable
     // rather than a static library.

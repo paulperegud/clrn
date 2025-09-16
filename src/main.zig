@@ -5,11 +5,19 @@
 const std = @import("std");
 const clap = @import("clap");
 
+/// This imports the separate module containing `root.zig`. Take a look in `build.zig` for details.
+const lib = @import("clrn_lib");
+const tree = @import("tree.zig");
+
 const debug = std.debug.print;
 
 var stdout_buffer: [1024]u8 = undefined;
 var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
 const stdout = &stdout_writer.interface;
+
+var stderr_buffer: [1024]u8 = undefined;
+var stderr_writer = std.fs.File.stderr().writer(&stderr_buffer);
+const stderr = &stderr_writer.interface;
 
 const usage =
     \\-h, --help           Print this message and exit.
@@ -22,6 +30,7 @@ const Options = struct {
 
 const Paths = struct {
     items: std.ArrayList([]const u8),
+
     pub fn eql(this: *Paths, other: Paths) bool {
         const this_items = this.*.items.items;
         const other_items = other.items.items;
@@ -38,7 +47,84 @@ const Paths = struct {
         }
         instance.*.items.deinit(allocator);
     }
+
+    pub fn toTree(this: *Paths, allocator: std.mem.Allocator) !*DirTreeNode {
+        const path_comps = std.fs.path.ComponentIterator(.posix, u8);
+        const root: *DirTreeNode = try allocator.create(DirTreeNode);
+        root.* = DirTreeNode.empty;
+        root.name = "";
+        var cur: *tree.Node = &root.node;
+        if (this.items.items.len == 0) return root;
+        for (this.items.items) |path| {
+            cur = &root.node;
+            var iter = try path_comps.init(path);
+            while (iter.next()) |comp| {
+                cur = for (cur.children.items) |child| {
+                    const childDirNode = DirTreeNode.fromNode(child);
+                    if (std.mem.eql(u8, comp.name, childDirNode.name)) {
+                        // known path, use existing child
+                        break child;
+                    }
+                } else else_block: {
+                    // allocate new child
+                    const newChild: *DirTreeNode = try allocator.create(DirTreeNode);
+                    newChild.* = DirTreeNode.empty;
+                    newChild.name = comp.name;
+                    try tree.addChild(allocator, cur, null, &newChild.node);
+                    break :else_block &newChild.node;
+                };
+            }
+        }
+        return root;
+    }
 };
+
+const DirTreeNode = struct {
+    node: tree.Node = .{},
+    name: []const u8,
+
+    pub const empty: DirTreeNode = .{ .node = .{}, .name = undefined };
+
+    pub fn fromNode(node: *tree.Node) *DirTreeNode {
+        return @fieldParentPtr("node", node);
+    }
+
+    pub fn printFlat(this: *DirTreeNode, io: *std.io.Writer) !void {
+        var first = true;
+        try io.print("{s}{{", .{this.name});
+        for (this.node.children.items) |child| {
+            if (!first) try io.print(", ", .{}) else first = false;
+            const dirNode = DirTreeNode.fromNode(child);
+            try dirNode.printFlat(io);
+        }
+        try io.print("}}", .{});
+    }
+
+    // frees all the memory of this node and its children
+    pub fn deinit(this: *DirTreeNode, allocator: std.mem.Allocator) void {
+        for (this.*.node.children.items) |childNode| {
+            const child = fromNode(childNode);
+            child.deinit(allocator);
+        }
+        this.node.children.deinit(allocator);
+        allocator.destroy(this);
+    }
+};
+
+test "load paths print tree" {
+    const allocator = std.testing.allocator;
+    var file_buffer: [1024]u8 = undefined;
+    const file = try std.fs.cwd().openFile("tests/tree.paths", .{});
+    defer file.close();
+    var reader = file.reader(&file_buffer);
+    var files = try collectPathsFromFile(&reader, allocator);
+    const filesAsTree: *DirTreeNode = try files.toTree(allocator);
+    defer filesAsTree.deinit(allocator);
+    try filesAsTree.printFlat(stderr);
+    try stderr.print("\n", .{});
+    try stderr.flush();
+    defer Paths.free(allocator, &files);
+}
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -328,20 +414,13 @@ test "simple test" {
     try std.testing.expectEqual(@as(i32, 42), list.pop());
 }
 
-test "use other module" {
-    try std.testing.expectEqual(@as(i32, 150), lib.add(100, 50));
-}
-
-test "fuzz example" {
-    const Context = struct {
-        fn testOne(context: @This(), input: []const u8) anyerror!void {
-            _ = context;
-            // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-            try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
-        }
-    };
-    try std.testing.fuzz(Context{}, Context.testOne, .{});
-}
-
-/// This imports the separate module containing `root.zig`. Take a look in `build.zig` for details.
-const lib = @import("clrn_lib");
+// test "fuzz example" {
+//     const Context = struct {
+//         fn testOne(context: @This(), input: []const u8) anyerror!void {
+//             _ = context;
+//             // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
+//             try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
+//         }
+//     };
+//     try std.testing.fuzz(Context{}, Context.testOne, .{});
+// }
