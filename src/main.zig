@@ -352,7 +352,10 @@ pub fn getInteractiveChoice(prompt: []const u8, options: []const InteractiveChoi
         if (!first) {
             debug("/", .{});
         }
-        debug("{s}", .{[1]u8{option.short}});
+        if (!option.default)
+            debug("{s}", .{[1]u8{option.short}})
+        else
+            debug("[{s}]", .{[1]u8{option.short - 32}});
         first = false;
     }
     debug("] ", .{});
