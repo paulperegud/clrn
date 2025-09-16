@@ -100,6 +100,41 @@ const DirTreeNode = struct {
         try io.print("}}", .{});
     }
 
+    pub fn printTree(this: *DirTreeNode, io: *std.io.Writer, allocator: std.mem.Allocator) !void {
+        var neighbours = std.ArrayList(bool).empty;
+        // try neighbours.append(allocator, false);
+        defer neighbours.deinit(allocator);
+        try printTreeDeep(this, io, allocator, &neighbours);
+    }
+
+    fn printTreeDeep(this: *DirTreeNode, io: *std.io.Writer, allocator: std.mem.Allocator, prefix: *std.ArrayList(bool)) !void {
+        const children = this.node.children;
+        if (prefix.items.len > 1) {
+            for (0..prefix.items.len - 1) |d| {
+                if (prefix.items[d]) try io.print("│  ", .{}) else try io.print("   ", .{});
+            }
+        }
+        if (prefix.items.len > 0) {
+            if (prefix.items[prefix.items.len - 1]) try io.print("├──", .{}) else try io.print("└──", .{});
+        }
+        try io.print("{s}\n", .{this.name});
+        if (children.items.len > 1) {
+            try prefix.append(allocator, true);
+            for (children.items[0 .. children.items.len - 1]) |childNode| {
+                const child = DirTreeNode.fromNode(childNode);
+                try printTreeDeep(child, io, allocator, prefix);
+            }
+            _ = prefix.pop();
+        }
+        if (children.items.len > 0) {
+            try prefix.append(allocator, false);
+            const childNode = children.items[children.items.len - 1];
+            const child = DirTreeNode.fromNode(childNode);
+            try printTreeDeep(child, io, allocator, prefix);
+            _ = prefix.pop();
+        }
+    }
+
     // frees all the memory of this node and its children
     pub fn deinit(this: *DirTreeNode, allocator: std.mem.Allocator) void {
         for (this.*.node.children.items) |childNode| {
@@ -121,6 +156,10 @@ test "load paths print tree" {
     const filesAsTree: *DirTreeNode = try files.toTree(allocator);
     defer filesAsTree.deinit(allocator);
     try filesAsTree.printFlat(stderr);
+    try stderr.print("\n", .{});
+    try stderr.flush();
+    try stderr.print("\n", .{});
+    try filesAsTree.printTree(stderr, allocator);
     try stderr.print("\n", .{});
     try stderr.flush();
     defer Paths.free(allocator, &files);
