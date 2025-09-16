@@ -247,12 +247,19 @@ pub fn main() !void {
         std.posix.exit(1);
     }
     // print it
-    debug("imagine that this is your commands, printed out...\n", .{});
+    const commandsTree = try commands.toTree(allocator);
+    defer commandsTree.deinit(allocator);
+    try commandsTree.printTree(stderr, allocator);
+    try stderr.flush();
+
     // ask if continue
     while (true) {
-        const mbanswer = try getInteractiveChoice("Commit this change?", &.{ .{ .short = 'y', .long = "yes" }, .{ .short = 'n', .long = "no" } });
+        const mbanswer = try getInteractiveChoice("Commit this change?", &.{ .{ .short = 'y', .long = "yes", .default = true }, .{ .short = 'n', .long = "no" } });
         if (mbanswer) |answer| {
-            debug("committing... {s}\n", .{answer.long});
+            if (answer.short != 'y') {
+                debug("exiting...", .{});
+                std.posix.exit(0);
+            }
             break;
         } else {
             debug("Please answer one of the following...\n", .{});
