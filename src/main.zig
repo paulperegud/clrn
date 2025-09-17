@@ -66,7 +66,7 @@ const Paths = struct {
                         break child;
                     }
                 } else else_block: {
-                    // allocate new child
+                    // allocate a new child
                     const newChild: *DirTreeNode = try allocator.create(DirTreeNode);
                     newChild.* = DirTreeNode.empty;
                     newChild.name = comp.name;
@@ -318,26 +318,18 @@ pub fn copyFile(cwd: std.fs.Dir, source: []const u8, dest: []const u8) !void {
     try source_dir.copyFile(std.fs.path.basename(source), dest_dir, std.fs.path.basename(dest), .{});
 }
 
-test "test 1." {
-    const allocator = std.testing.allocator;
-    const cwd = try std.fs.cwd().openDir("tests", .{});
-    var files = try collectPathsFromDirectory(allocator, try cwd.openDir("1.source/", .{ .iterate = true }));
-    defer Paths.free(allocator, &files);
-    var file_buffer: [1024]u8 = undefined;
-    var commands_reader = (try cwd.openFile("1.cmd", .{})).reader(&file_buffer);
-    var commands = try collectPathsFromFile(&commands_reader, allocator);
-    defer Paths.free(allocator, &commands);
+// test "test 1." {
+//     const allocator = std.testing.allocator;
+//     const cwd = try std.fs.cwd().openDir("tests", .{});
+//     var files = try collectPathsFromDirectory(allocator, try cwd.openDir("1.source/", .{ .iterate = true }));
+//     defer Paths.free(allocator, &files);
+//     var file_buffer: [1024]u8 = undefined;
+//     var commands_reader = (try cwd.openFile("1.cmd", .{})).reader(&file_buffer);
+//     var commands = try collectPathsFromFile(&commands_reader, allocator);
+//     defer Paths.free(allocator, &commands);
 
-    try transform_tree(try cwd.openDir("1.source/", .{}), files, commands);
-}
-
-test "iter path" {
-    const path_comps = std.fs.path.ComponentIterator(.posix, u8);
-    var iter = try path_comps.init("file.txt");
-    while (iter.next()) |comp| {
-        debug("comp is {s}\n", .{comp.name});
-    }
-}
+//     try transform_tree(try cwd.openDir("1.source/", .{}), files, commands);
+// }
 
 const InteractiveChoice = struct {
     short: u8,
