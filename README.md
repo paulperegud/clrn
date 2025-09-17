@@ -9,7 +9,7 @@ This tool is somewhat similar to qmv from moreutils, but takes the idea one step
 `clrn` is written in Zig. To compile from source, you will need zig 0.15.1. To install for the local user (assuming `$HOME/.local/bin` is in `$PATH`), run:
 
 ```sh
-zig build --release=small --prefix $HOME/.local  
+zig build install --release=small --prefix $HOME/.local  
 ```
 
 which will install `clrn`.
