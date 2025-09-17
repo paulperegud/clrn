@@ -19,13 +19,19 @@ var stderr_buffer: [1024]u8 = undefined;
 var stderr_writer = std.fs.File.stderr().writer(&stderr_buffer);
 const stderr = &stderr_writer.interface;
 
+const intro =
+    \\Rename files and edit directory tree using $EDITOR.
+;
+
 const usage =
-    \\-h, --help           Print this message and exit.
-    \\<DIRECTORY>          Directory name or `-` for stdin
+    \\-h, --help                 Print this message and exit.
+    \\-e, --editor <EDITOR>      Use EDITOR instead of default editor.   
+    \\<DIRECTORY>                Directory name or `-` for stdin
 ;
 
 const Options = struct {
     directory: []const u8 = undefined,
+    editor: []const u8 = "nano",
 };
 
 const Paths = struct {
@@ -174,6 +180,7 @@ pub fn main() !void {
 
     const parsers = comptime .{
         .DIRECTORY = clap.parsers.string,
+        .EDITOR = clap.parsers.string,
     };
 
     var diag = clap.Diagnostic{};
@@ -190,11 +197,16 @@ pub fn main() !void {
     if (params.args.help != 0) {
         try stdout.print("Usage:  clrn ", .{});
         try clap.usage(stdout, clap.Help, &parsed_help);
-        try stdout.print("\n\n", .{});
+        try stdout.print("\n{s}\n\n", .{intro});
         try clap.help(stdout, clap.Help, &parsed_help, .{ .spacing_between_parameters = 0 });
         try stdout.flush();
         std.posix.exit(1);
     }
+    opts.editor = "nano";
+    if (params.args.editor) |editor| {
+        opts.editor = editor;
+    } else if (std.posix.getenv("EDITOR")) |env| opts.editor = env;
+
     opts.directory = params.positionals[0] orelse ".";
 
     var files: Paths = try collectPaths(allocator, opts.directory);
@@ -212,10 +224,10 @@ pub fn main() !void {
             debug("tmp file deletion failed: {any}\n", .{err});
         };
     }
-    var nvim = std.process.Child.init(&.{ "nvim", cmd_file_name }, allocator);
-    // wait for nvim
-    _ = try nvim.spawn();
-    _ = try nvim.wait();
+    var editorProcess = std.process.Child.init(&.{ opts.editor, cmd_file_name }, allocator);
+    // wait for editorProcess
+    _ = try editorProcess.spawn();
+    _ = try editorProcess.wait();
     // read the file
     var commands: Paths = load_commands: {
         // TODO: size of this buffer should be determined by the size of the file
@@ -243,7 +255,7 @@ pub fn main() !void {
     }
     // check if there is actual work to be done
     if (files.items.items.len == 0) {
-        debug("File names are unchanged.\n", .{});
+        debug("Paths are unchanged, doing nothing.\n", .{});
         std.posix.exit(1);
     }
     // print it
