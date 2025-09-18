@@ -25,7 +25,7 @@
       packages.default = pkgs.stdenv.mkDerivation {
         pname = "clrn";
         version = "0.15.1";
-        doCheck = false;
+        doCheck = true;
         src = ./.;
 
         nativeBuildInputs = with pkgs; [zig_0_15];
