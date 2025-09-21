@@ -375,7 +375,7 @@ pub fn getInteractiveChoice(prompt: []const u8, options: []const InteractiveChoi
 }
 
 pub fn writeFilesToTmpfileAlloc(allocator: std.mem.Allocator, files: Paths) ![]const u8 {
-    const tmp = std.posix.getenv("TMP");
+    const tmp = std.posix.getenv("TMP") orelse std.posix.getenv("TMPDIR");
     const cmd_file_name: []const u8 = try std.fs.path.join(allocator, &.{ tmp.?, "clrn.cmd" });
     const cmd_file = try std.fs.createFileAbsolute(cmd_file_name, .{});
     for (files.items.items) |line| {
