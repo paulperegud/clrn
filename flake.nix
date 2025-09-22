@@ -42,7 +42,7 @@
 
         meta = with pkgs.lib; {
           description = "batch renaming for filesystem trees";
-          platforms = platforms.linux;
+          platforms = platforms.linux ++ platforms.darwin;
           licence = licences.gpl3;
         };
       };
