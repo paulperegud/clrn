@@ -1,4 +1,5 @@
 const std = @import("std");
+const zzdoc = @import("zzdoc");
 
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
@@ -108,6 +109,13 @@ pub fn build(b: *std.Build) void {
     // This will evaluate the `run` step rather than the default, which is "install".
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
+
+    // man
+    var man_step = zzdoc.addManpageStep(b, .{ .root_doc_dir = b.path("docs/") });
+
+    // Install step
+    const install_step = man_step.addInstallStep(.{});
+    b.default_step.dependOn(&install_step.step);
 
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.

@@ -40,6 +40,10 @@
             .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.11.0.tar.gz",
             .hash = "clap-0.11.0-oBajB-HnAQDPCKYzwF7rO3qDFwRcD39Q0DALlTSz5H7e",
         },
+        .zzdoc = .{
+            .url = "https://github.com/rockorager/zzdoc/archive/a54223bdc13a80839ccf9f473edf3a171e777946.tar.gz",
+            .hash = "zzdoc-0.0.0-tzT1Ph7cAAC5YmXQXiBJHAg41_A5AUAC5VOm7ShnUxlz",
+        },
     },
     .paths = .{
         "build.zig",

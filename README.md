@@ -1,8 +1,9 @@
 # clrn
 
-Edit directory tree, using your editor of choice.
+Batch rename files and edit directory tree, using your editor of choice.
 
 This tool is somewhat similar to qmv from moreutils, but takes the idea one step further, allowing to edit (and create) directories as a part of the edit.
+If destination path is on other mount point, file will be copied instead of moved.
 
 ## Installation
 
@@ -15,6 +16,10 @@ zig build install --release=small --prefix $HOME/.local
 which will install `clrn`.
 
 Alternatively, you can use included nix flake.
+
+##
+
+Tested on Linux and MacOS.
 
 ## Usage
 
